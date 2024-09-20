@@ -1,0 +1,156 @@
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <title>GraphTD3</title>
+        <style type="text/css">
+        pre code
+		{
+        color:rgb(127, 0, 85);
+        line-height:1.4;
+	    font-family:Consolas;
+        }
+
+        pre comment
+		{
+        color:rgb(63, 127, 95);
+        line-height:1.4;
+	    font-family:Consolas;
+		}
+
+        pre	{
+	    margin: 0;
+        padding-left: 5px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+	    border: 0;
+	    border: 1px dotted #785;
+	    background: #f5f5f5;
+	    line-height:1.4;
+	    font-family:Consolas;
+        }
+
+        .content{
+            margin-left:250;
+            margin-right:250;
+        }
+        </style>
+    </head>
+<body>
+<div class="content">
+<h1>GraphTD3: A Deep Reinforcement Learning-Based Incentive Mechanism for Crowdsourcing Social Network</h1>
+<hr/>
+<p style="text-align:justify">Crowdsourcing workers often face challenges such as trust deficits, insufficient interaction, low participation, and inefficient reward mechanisms when collaborating on tasks. Traditional approaches, typically based on static rule designs, struggle to adapt to the dynamic behaviors of workers and the complex collaboration needs of real-world tasks. To address these limitations, we designed a novel simulation-based AGM (Agent-based Game Model) environment that models worker behavior as a game-theoretic problem, allowing for more accurate simulations of decision-making processes during interactions.</p>
+
+<p style="text-align:justify"> In this paper, we propose \textit{GraphTD3}, a deep reinforcement learning-based method specifically designed to encourage effective cooperation among workers in social networks while operating under limited budget constraints. By aligning incentives with both individual worker interests and collective efficiency, our approach fosters collaboration and improves task performance. We evaluated \textit{GraphTD3} using four real-world social network datasets, and the results showed that it consistently outperformed baseline methods in three of the datasets. Simulation results demonstrate the effectiveness and feasibility of \textit{GraphTD3} in crowdsourcing environments. </p>
+
+
+<h2>GraphTD3 model and dataset</h2>
+<hr/>
+<h3>GraphTD3 Model</h3>
+<p style="text-align:justify">We show the  implementation of part of the <i>GraphTD3</i> model through the following code.</p>
+<pre><code>
+class GraphTD3(nn.Module):
+    def __init__(self, input_dim, node_embedding_dim, graph_embedding_dim, action_dim, max_num_nodes=10, gcn_num_layers=2,
+                 num_pooling=1, assign_dim=40, num_aggs=1, use_cuda=True):
+        super(GraphTD3, self).__init__()
+        self.node_embedding_dim = node_embedding_dim
+        self.graph_embedding_dim = graph_embedding_dim
+        self.input_dim = input_dim
+        if use_cuda:
+            self.device = utls.get_torch_device()
+        else:
+            self.device = torch.device("cpu")
+
+
+        self.out_graph_embedder = CGNN(input_dim=input_dim, hidden_dim=node_embedding_dim, num_neighbors_list=[5]).to(self.device)
+        self.in_graph_embedder = CGNN(input_dim=input_dim, hidden_dim=node_embedding_dim, num_neighbors_list=[5]).to(
+            self.device)
+        self.actor = Actor(action_dim * 2, action_dim).to(self.device)
+        self.critic = Critic(action_dim * 2, action_dim).to(self.device)
+        self.input_dim = input_dim
+        self.node_embedding_dim = node_embedding_dim
+        self.graph_embedding_dim = graph_embedding_dim
+
+    def actor_forward(self, nodes_attr, adj, adjust_dim=True, convert_torch=True):
+        state_embed = self.get_embeddings(nodes_attr, adj, adjust_dim=adjust_dim, convert_torch=convert_torch)
+        action = self.actor(state_embed)
+        return action
+
+    def critic_forward(self, nodes_attr, adj, nodes, adjust_dim=True, convert_torch=True, node_labels=True):
+        if node_labels:
+            state_embed = self.get_embeddings(nodes_attr, adj, nodes, adjust_dim=adjust_dim,
+                                                            convert_torch=convert_torch)
+
+            # if isinstance(nodes, Iterable):
+            #    state_embed = state_embed.expand(len(nodes), state_embed.size()[0])
+        else:
+            state_embed = self.get_embeddings(nodes_attr, adj, adjust_dim=adjust_dim, convert_torch=convert_torch)
+        action_embed = nodes
+        q_val1, q_val2 = self.critic(state_embed, action_embed)
+        return q_val1, q_val2
+
+    def critic_forward1(self, nodes_attr, adj, nodes, adjust_dim=True, convert_torch=True, node_labels=True):
+        if node_labels:
+            state_embed = self.get_embeddings(nodes_attr, adj, nodes, adjust_dim=adjust_dim,
+                                                            convert_torch=convert_torch)
+
+            # if isinstance(nodes, Iterable):
+            #    state_embed = state_embed.expand(len(nodes), state_embed.size()[0])
+        else:
+            state_embed = self.get_embeddings(nodes_attr, adj, adjust_dim=adjust_dim, convert_torch=convert_torch)
+        action_embed = nodes
+        q_val = self.critic.q1(state_embed, action_embed)
+        return q_val
+
+    def critic_forward2(self, nodes_attr, adj, nodes, adjust_dim=True, convert_torch=True, node_labels=True):
+        if node_labels:
+            state_embed = self.get_embeddings(nodes_attr, adj, nodes, adjust_dim=adjust_dim,
+                                                            convert_torch=convert_torch)
+
+            # if isinstance(nodes, Iterable):
+            #    state_embed = state_embed.expand(len(nodes), state_embed.size()[0])
+        else:
+            state_embed = self.get_embeddings(nodes_attr, adj, adjust_dim=adjust_dim, convert_torch=convert_torch)
+        action_embed = nodes
+        q_val = self.critic.q2(state_embed, action_embed)
+        return q_val
+
+    def get_embeddings(self, nodes_attr, adj, nodes=None, adjust_dim=True, convert_torch=True):
+        if convert_torch:
+            if adjust_dim:
+                nodes_attr = np.float32(nodes_attr).reshape((1,) + nodes_attr.shape)
+                adj[0] = np.float32(adj[0]).reshape((1,) + adj[0].shape)
+                adj[1] = np.float32(adj[1]).reshape((1,) + adj[1].shape)
+
+            nodes_attr = Variable(torch.from_numpy(nodes_attr)).to(self.device)
+            adj[0] = Variable(torch.from_numpy(adj[0])).to(self.device)
+            adj[1] = Variable(torch.from_numpy(adj[1])).to(self.device)
+        out_node_embed, out_graph_embed = self.out_graph_embedder.forward(nodes_attr, adj[0])
+        in_node_embed, in_graph_embed = self.in_graph_embedder.forward(nodes_attr, adj[0])
+        out_state_embed = torch.mm(out_graph_embed, out_node_embed.T)
+        in_state_embed = torch.mm(in_graph_embed, in_node_embed.T)
+        state_embed = torch.cat((out_state_embed, in_state_embed), dim=1)
+        state_embed = F.normalize(state_embed, p=2)
+        return state_embed
+
+    def forward(self, nodes_attr=None, adj=None, nodes=None, adjust_dim=True, convert_torch=True, node_labels=True):
+        if nodes_attr is None:
+            nodes_attr = np.random.rand(100, self.input_dim)
+            adj = np.random.rand(100, 100)
+        action = self.actor_forward(nodes_attr, adj, adjust_dim, convert_torch)
+        q_vals1, q_vals2 = None, None
+        if nodes is not None:
+            q_vals1, q_vals2 = self.critic_forward(nodes_attr, adj, nodes, adjust_dim, convert_torch, node_labels)
+
+        return action, q_vals1, q_vals2
+</code></pre>
+
+
+<h3>GraphTD3 Dataset</h3>
+<p style="text-align:justify">The dataset and complete code can be accessed through the following URL<a href="">dataset</a></p>
+
+
+</div>
+
+</body>
+</html>
